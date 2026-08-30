@@ -159,9 +159,14 @@ const patches = {
   ],
 
   'pages/remote.vue': [
+    ['title="Resize preview height"', 'title="调整预览高度"'],
     ['title="Increase font size"', 'title="放大字号"'],
     ['title="Decrease font size"', 'title="减小字号"'],
     ['title="Edit Notes"', 'title="编辑备注"'],
+    [":title=\"isDark ? 'Switch to light mode theme' : 'Switch to dark mode theme'\"", ":title=\"isDark ? '切换到浅色主题' : '切换到深色主题'\""],
+    [":title=\"status === 'running' ? 'Pause timer' : 'Start timer'\"", ":title=\"status === 'running' ? '暂停计时' : '开始计时'\""],
+    ['title="Reset timer"', 'title="重置计时"'],
+    ['title="Show slide overview"', 'title="幻灯片概览"'],
     ['title="Go to previous slide"', 'title="上一页"'],
     ['title="Go to next slide"', 'title="下一页"'],
   ],

@@ -58,6 +58,7 @@ const patches = {
   'pages/entry.vue': [
     ['" /> Slides', '" /> 幻灯片'],
     ['" /> Presenter', '" /> 演讲者'],
+    ['" /> Remote', '" /> 遥控'],
     ['" /> Notes', '" /> 演讲备注'],
     ['" /> Overview', '" /> 概览'],
   ],
@@ -155,6 +156,14 @@ const patches = {
 
   'internals/ExportPdfTip.vue': [
     ['<div class="i-carbon:information my-auto" /> Tips', '<div class="i-carbon:information my-auto" /> 提示'],
+  ],
+
+  'pages/remote.vue': [
+    ['title="Increase font size"', 'title="放大字号"'],
+    ['title="Decrease font size"', 'title="减小字号"'],
+    ['title="Edit Notes"', 'title="编辑备注"'],
+    ['title="Go to previous slide"', 'title="上一页"'],
+    ['title="Go to next slide"', 'title="下一页"'],
   ],
 
   'pages/presenter.vue': [

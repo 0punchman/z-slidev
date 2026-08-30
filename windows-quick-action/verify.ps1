@@ -30,6 +30,7 @@ foreach ($ext in @('.md', '.markdown')) {
 $env:SLIDEV_RUNTIME = $Runtime
 & node (Join-Path $AppDir 'scripts\runtime-postinstall.mjs') | Out-Null
 & node (Join-Path $AppDir 'scripts\ensure-pnpm-entry.mjs') | Out-Null
+& node (Join-Path $Runtime 'scripts\remote-view-patch.mjs') | Out-Null
 & node (Join-Path $Runtime 'scripts\zh-cn-patch.mjs') | Out-Null
 
 $slidevCmd = Get-Command slidev -ErrorAction SilentlyContinue

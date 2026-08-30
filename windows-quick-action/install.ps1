@@ -43,6 +43,7 @@ $copies = @(
   @{ Src = 'runtime-postinstall.mjs'; Dst = (Join-Path $ScriptsDir 'runtime-postinstall.mjs') }
   @{ Src = 'ensure-pnpm-entry.mjs';    Dst = (Join-Path $ScriptsDir 'ensure-pnpm-entry.mjs') }
   @{ Src = 'zh-cn-patch.mjs';          Dst = (Join-Path $Runtime 'scripts\zh-cn-patch.mjs') }
+  @{ Src = 'remote-view-patch.mjs';    Dst = (Join-Path $Runtime 'scripts\remote-view-patch.mjs') }
   @{ Src = 'runtime-package.json';     Dst = (Join-Path $Runtime 'package.json') }
   @{ Src = 'runtime-package-lock.json'; Dst = (Join-Path $Runtime 'package-lock.json') }
 )
@@ -64,6 +65,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'runtime-postinstall 失败' }
   & node (Join-Path $ScriptsDir 'ensure-pnpm-entry.mjs')
   if ($LASTEXITCODE -ne 0) { throw 'ensure-pnpm-entry 失败' }
+  & node (Join-Path $Runtime 'scripts\remote-view-patch.mjs')
+  if ($LASTEXITCODE -ne 0) { throw 'remote-view-patch 失败' }
   & node (Join-Path $Runtime 'scripts\zh-cn-patch.mjs')
   if ($LASTEXITCODE -ne 0) { throw 'zh-cn-patch 失败' }
 } finally {

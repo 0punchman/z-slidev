@@ -289,6 +289,18 @@ if (Test-Path -LiteralPath $postinstall) {
   & $NodeBin $postinstall *>> (Join-Path $LogDir 'postinstall.log')
 }
 
+$remotePatch = Join-Path $SlidevRuntime 'scripts\remote-view-patch.mjs'
+if (Test-Path -LiteralPath $remotePatch) {
+  $env:SLIDEV_RUNTIME = $SlidevRuntime
+  & $NodeBin $remotePatch *>> (Join-Path $LogDir 'remote-view-patch.log')
+}
+
+$zhCnPatch = Join-Path $SlidevRuntime 'scripts\zh-cn-patch.mjs'
+if (Test-Path -LiteralPath $zhCnPatch) {
+  $env:SLIDEV_RUNTIME = $SlidevRuntime
+  & $NodeBin $zhCnPatch *>> (Join-Path $LogDir 'zh-cn-patch.log')
+}
+
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $logFile = Join-Path $LogDir "$stamp.log"
 
@@ -296,7 +308,7 @@ try {
   # Compatible with Windows PowerShell 5.1 (.NET Framework) and PowerShell 7+.
   $psi = New-Object System.Diagnostics.ProcessStartInfo
   $psi.FileName = $NodeBin
-  $psi.Arguments = "`"$CliEntry`" `"$MdAbs`" --port $SlidevPort"
+  $psi.Arguments = "`"$CliEntry`" `"$MdAbs`" --port $SlidevPort --remote"
   $psi.WorkingDirectory = $MdDir
   $psi.UseShellExecute = $false
   $psi.RedirectStandardOutput = $true

@@ -15,7 +15,9 @@ check_file "$HOME/.cursor/skills/slidev/SKILL.md"
 /usr/bin/plutil -lint "$SERVICE/Contents/Info.plist" "$SERVICE/Contents/document.wflow" >/dev/null
 bash -n "$APP_DIR/bin/slidev-present"
 SLIDEV_RUNTIME="$RUNTIME" node "$APP_DIR/scripts/runtime-postinstall.mjs"
+node "$RUNTIME/scripts/remote-view-patch.mjs" >/dev/null
 node "$RUNTIME/scripts/zh-cn-patch.mjs" >/dev/null
+check_file "$RUNTIME/node_modules/@slidev/client/pages/remote.vue"
 
 SLIDEV_COMMAND="$(command -v slidev || true)"
 [[ -n "$SLIDEV_COMMAND" ]] || { echo "找不到全局 slidev 命令链接" >&2; exit 1; }

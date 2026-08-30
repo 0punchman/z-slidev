@@ -108,5 +108,5 @@ foreach ($k in @(
 
 $env:SLIDEV_EXTRA_FS_ALLOW = $SlidevRuntime
 Set-Location -LiteralPath $MdDir
-& $NodeBin $CliEntry $MdAbs --port $SlidevPort --open
+& $NodeBin $CliEntry $MdAbs --port $SlidevPort --remote --open
 exit $LASTEXITCODE

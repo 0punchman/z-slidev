@@ -250,6 +250,12 @@ if [[ -f "$POSTINSTALL_SCRIPT" ]]; then
     >>"$LOG_DIR/postinstall.log" 2>&1 || true
 fi
 
+REMOTE_PATCH="$SLIDEV_RUNTIME/scripts/remote-view-patch.mjs"
+if [[ -f "$REMOTE_PATCH" ]]; then
+  SLIDEV_RUNTIME="$SLIDEV_RUNTIME" "$NODE_BIN" "$REMOTE_PATCH" \
+    >>"$LOG_DIR/remote-view-patch.log" 2>&1 || true
+fi
+
 ZH_CN_PATCH="$SLIDEV_RUNTIME/scripts/zh-cn-patch.mjs"
 if [[ -f "$ZH_CN_PATCH" ]]; then
   SLIDEV_RUNTIME="$SLIDEV_RUNTIME" "$NODE_BIN" "$ZH_CN_PATCH" \
@@ -284,7 +290,7 @@ env \
   -u VSCODE_NODE_CACHED_DATA_DIR \
   -u ELECTRON_RUN_AS_NODE \
   SLIDEV_EXTRA_FS_ALLOW="$SLIDEV_RUNTIME" \
-  "$NODE_BIN" "$CLI_ENTRY" "$MD_ABS" --port "$SLIDEV_PORT" >"$LOG_FILE" 2>&1 &
+  "$NODE_BIN" "$CLI_ENTRY" "$MD_ABS" --port "$SLIDEV_PORT" --remote >"$LOG_FILE" 2>&1 &
 SLIDEV_PID=$!
 
 notify "正在启动：$MD_NAME"

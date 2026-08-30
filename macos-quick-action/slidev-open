@@ -126,6 +126,16 @@ if [[ -f "$POSTINSTALL_SCRIPT" ]]; then
   SLIDEV_RUNTIME="$SLIDEV_RUNTIME" "$NODE_BIN" "$POSTINSTALL_SCRIPT" 2>/dev/null || true
 fi
 
+REMOTE_PATCH="$SLIDEV_RUNTIME/scripts/remote-view-patch.mjs"
+if [[ -f "$REMOTE_PATCH" ]]; then
+  SLIDEV_RUNTIME="$SLIDEV_RUNTIME" "$NODE_BIN" "$REMOTE_PATCH" 2>/dev/null || true
+fi
+
+ZH_CN_PATCH="$SLIDEV_RUNTIME/scripts/zh-cn-patch.mjs"
+if [[ -f "$ZH_CN_PATCH" ]]; then
+  SLIDEV_RUNTIME="$SLIDEV_RUNTIME" "$NODE_BIN" "$ZH_CN_PATCH" 2>/dev/null || true
+fi
+
 exec env \
   -u VSCODE_CWD \
   -u VSCODE_PID \
@@ -135,4 +145,4 @@ exec env \
   -u VSCODE_NODE_CACHED_DATA_DIR \
   -u ELECTRON_RUN_AS_NODE \
   SLIDEV_EXTRA_FS_ALLOW="$SLIDEV_RUNTIME" \
-  "$NODE_BIN" "$CLI_ENTRY" "$MD_ABS" --port "$SLIDEV_PORT" --open
+  "$NODE_BIN" "$CLI_ENTRY" "$MD_ABS" --port "$SLIDEV_PORT" --remote --open

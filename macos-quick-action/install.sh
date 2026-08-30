@@ -26,6 +26,7 @@ install -m 755 "$HERE/slidev-present" "$APP_DIR/bin/slidev-present"
 install -m 755 "$HERE/slidev-open" "$APP_DIR/bin/slidev-open"
 install -m 644 "$HERE/runtime-postinstall.mjs" "$APP_DIR/scripts/runtime-postinstall.mjs"
 install -m 644 "$HERE/zh-cn-patch.mjs" "$RUNTIME/scripts/zh-cn-patch.mjs"
+install -m 644 "$HERE/remote-view-patch.mjs" "$RUNTIME/scripts/remote-view-patch.mjs"
 install -m 644 "$HERE/runtime-package.json" "$RUNTIME/package.json"
 install -m 644 "$HERE/runtime-package-lock.json" "$RUNTIME/package-lock.json"
 
@@ -33,6 +34,7 @@ install -m 644 "$HERE/runtime-package-lock.json" "$RUNTIME/package-lock.json"
   cd "$RUNTIME"
   npm ci --no-audit --no-fund
   SLIDEV_RUNTIME="$RUNTIME" node "$APP_DIR/scripts/runtime-postinstall.mjs"
+  node "$RUNTIME/scripts/remote-view-patch.mjs"
   node "$RUNTIME/scripts/zh-cn-patch.mjs"
 )
 

@@ -1,0 +1,3 @@
+[submodule "slidev"]
+	path = slidev
+	url = https://github.com/0punchman/slidev.git

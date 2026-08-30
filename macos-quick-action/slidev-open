@@ -1,0 +1,138 @@
+#!/usr/bin/env bash
+#
+# slidev-open <path-to-markdown>
+#
+# Launch a Slidev deck from ANY .md file using a shared, centralized runtime.
+# - Prefers port 3030; if occupied, uses the next free port through 4000
+# - Auto-opens the browser
+# - The .md folder stays clean: no package.json / node_modules required there
+# - All Node deps live in ONE place (SLIDEV_RUNTIME below), shared by every deck
+#
+# Override the runtime location with the SLIDEV_RUNTIME env var if needed.
+
+set -euo pipefail
+
+# Make sure node / common tools resolve when invoked from minimal PATH contexts
+# (Finder Services, launchd jobs, etc.).
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
+NODE_BIN="$(command -v node || true)"
+if [[ -z "$NODE_BIN" ]]; then
+  for cand in /usr/local/bin/node /opt/homebrew/bin/node; do
+    [[ -x "$cand" ]] && NODE_BIN="$cand" && break
+  done
+fi
+
+SLIDEV_RUNTIME="${SLIDEV_RUNTIME:-$HOME/Library/Application Support/Slidev/runtime}"
+SLIDEV_PORT_BASE="${SLIDEV_PORT:-3030}"
+SLIDEV_PORT_MAX="${SLIDEV_PORT_MAX:-4000}"
+
+if [[ $# -lt 1 ]]; then
+  cat >&2 <<'USAGE'
+Usage: slidev-open <markdown-file>
+
+Examples:
+  slidev-open ./slides.md
+  slidev-open ~/decks/2026-kickoff.md
+  slidev-open /abs/path/to/deck.md
+
+Env:
+  SLIDEV_RUNTIME  Path to the shared Slidev runtime directory.
+  SLIDEV_PORT     Preferred port (default 3030). Occupied ports bump up to SLIDEV_PORT_MAX.
+  SLIDEV_PORT_MAX Upper bound for port avoidance (default 4000).
+USAGE
+  exit 1
+fi
+
+MD_INPUT="$1"
+
+if [[ ! -f "$MD_INPUT" ]]; then
+  echo "slidev-open: file not found: $MD_INPUT" >&2
+  exit 1
+fi
+
+MD_DIR="$(cd "$(dirname "$MD_INPUT")" && pwd)"
+MD_NAME="$(basename "$MD_INPUT")"
+MD_ABS="$MD_DIR/$MD_NAME"
+
+# Real Slidev CLI entry inside the shared runtime.
+CLI_REAL="$SLIDEV_RUNTIME/node_modules/@slidev/cli/bin/slidev.mjs"
+# Aliased entry whose path contains `/.pnpm/` so Slidev's resolver treats this
+# runtime as a "globally installed" package. That makes it fall back to the
+# CLI's own node_modules to find themes/addons, which is exactly what we want
+# when the user's .md folder has no package.json / node_modules of its own.
+CLI_ENTRY="$SLIDEV_RUNTIME/.pnpm/slidev.mjs"
+
+if [[ ! -f "$CLI_REAL" ]]; then
+  echo "slidev-open: Slidev runtime not found at $SLIDEV_RUNTIME" >&2
+  echo "             Re-run setup or set SLIDEV_RUNTIME to a valid directory." >&2
+  exit 1
+fi
+
+if [[ ! -L "$CLI_ENTRY" ]]; then
+  mkdir -p "$(dirname "$CLI_ENTRY")"
+  ln -sf "$CLI_REAL" "$CLI_ENTRY"
+fi
+
+# Slidev uses Vite strictPort, so --port N never auto-bumps. Pick a free port here.
+pick_free_port() {
+  local p
+  for p in $(seq "$SLIDEV_PORT_BASE" "$SLIDEV_PORT_MAX"); do
+    /usr/sbin/lsof -nP -iTCP:"$p" -sTCP:LISTEN >/dev/null 2>&1 && continue
+    printf '%s' "$p"
+    return 0
+  done
+  return 1
+}
+
+SLIDEV_PORT="$(pick_free_port || true)"
+if [[ -z "$SLIDEV_PORT" ]]; then
+  echo "slidev-open: no free port in $SLIDEV_PORT_BASE–$SLIDEV_PORT_MAX" >&2
+  exit 1
+fi
+
+# Raise the file descriptor limit. Slidev/Vite + chokidar 5.x (no fsevents)
+# opens a lot of fs.watch handles, and macOS launchd-spawned processes default
+# to 256 — which causes "EMFILE: too many open files, watch" on startup.
+# 60000 stays under macOS's kern.maxfilesperproc (typically 61440).
+ulimit -n 60000 2>/dev/null || ulimit -n 16384 2>/dev/null || true
+
+echo "slidev-open: deck    = $MD_ABS"
+echo "slidev-open: runtime = $SLIDEV_RUNTIME"
+echo "slidev-open: port    = $SLIDEV_PORT (preferred $SLIDEV_PORT_BASE, auto-opening browser)"
+echo
+
+# Run with the deck's directory as cwd so chokidar doesn't try to watch the
+# runtime's huge node_modules. Slidev still resolves its theme/addon packages
+# correctly because the `.pnpm` alias above makes it walk the CLI's own
+# node_modules (i.e. the shared runtime).
+cd "$MD_DIR"
+
+# Strip VSCode/Cursor-injected env vars before launching node.
+#
+# If VSCODE_CWD is present, @unocss/preset-icons treats the process as a VSCode
+# host and SKIPS its filesystem icon loader entirely — meaning every
+# `i-carbon-*`, `i-ph-*`, etc. class fails to load and the nav bar / cover
+# icons render as empty boxes. Cursor injects VSCODE_CWD into every child
+# process (including system Terminal launched via osascript), so we clear it
+# here to keep behavior consistent regardless of how slidev-open is invoked.
+if [[ -z "$NODE_BIN" ]]; then
+  echo "slidev-open: node not found; install Node.js or fix PATH" >&2
+  exit 1
+fi
+
+POSTINSTALL_SCRIPT="$HOME/Library/Application Support/Slidev/scripts/runtime-postinstall.mjs"
+if [[ -f "$POSTINSTALL_SCRIPT" ]]; then
+  SLIDEV_RUNTIME="$SLIDEV_RUNTIME" "$NODE_BIN" "$POSTINSTALL_SCRIPT" 2>/dev/null || true
+fi
+
+exec env \
+  -u VSCODE_CWD \
+  -u VSCODE_PID \
+  -u VSCODE_IPC_HOOK \
+  -u VSCODE_IPC_HOOK_CLI \
+  -u VSCODE_NLS_CONFIG \
+  -u VSCODE_NODE_CACHED_DATA_DIR \
+  -u ELECTRON_RUN_AS_NODE \
+  SLIDEV_EXTRA_FS_ALLOW="$SLIDEV_RUNTIME" \
+  "$NODE_BIN" "$CLI_ENTRY" "$MD_ABS" --port "$SLIDEV_PORT" --open

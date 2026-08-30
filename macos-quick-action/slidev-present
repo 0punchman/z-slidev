@@ -1,0 +1,348 @@
+#!/usr/bin/env bash
+#
+# slidev-present <path-to-markdown>
+#
+# Finder/Quick Action friendly launcher:
+# - prefers port 3030, then 3031..4000 if occupied (Slidev CLI uses strictPort)
+# - reuses an already-running instance of the SAME markdown
+# - opens the matching http://localhost:<port>/
+# - watches browser TCP/WebSocket activity
+# - automatically stops Slidev after the page is closed
+
+set -euo pipefail
+
+# When launched from Finder Quick Actions / Services, PATH is the bare-minimum
+# /usr/bin:/bin:/usr/sbin:/sbin — which doesn't include node (/usr/local/bin)
+# or Homebrew (/opt/homebrew/bin). Augment PATH so `node`, `lsof`, `curl`,
+# `osascript` etc. resolve everywhere.
+export PATH="/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
+# Resolve `node` to an absolute path so we don't depend on PATH at all.
+NODE_BIN="$(command -v node || true)"
+if [[ -z "$NODE_BIN" ]]; then
+  for cand in /usr/local/bin/node /opt/homebrew/bin/node; do
+    [[ -x "$cand" ]] && NODE_BIN="$cand" && break
+  done
+fi
+
+SLIDEV_RUNTIME="${SLIDEV_RUNTIME:-$HOME/Library/Application Support/Slidev/runtime}"
+SLIDEV_PORT_BASE="${SLIDEV_PORT:-3030}"
+SLIDEV_PORT_MAX="${SLIDEV_PORT_MAX:-4000}"
+LOG_DIR="${TMPDIR:-/tmp}/slidev-present"
+mkdir -p "$LOG_DIR"
+
+notify() {
+  /usr/bin/osascript -e "display notification \"$1\" with title \"Slidev\"" >/dev/null 2>&1 || true
+}
+
+# fail <message> [log-file]
+# Always notify + log to stderr. When a log file is given, open it in TextEdit
+# so the failure is visible even when launched from Finder / Quick Actions.
+fail() {
+  local msg="$1"
+  local log="${2:-}"
+  notify "$msg"
+  echo "slidev-present: $msg" >&2
+  if [[ -n "$log" && -f "$log" ]]; then
+    /usr/bin/open -e "$log" >/dev/null 2>&1 || true
+  fi
+  exit 1
+}
+
+if [[ $# -lt 1 ]]; then
+  fail "请选择一个 Markdown 幻灯片文件"
+fi
+
+MD_INPUT="$1"
+if [[ ! -f "$MD_INPUT" ]]; then
+  fail "文件不存在：$MD_INPUT"
+fi
+
+case "${MD_INPUT##*.}" in
+  md|MD|markdown|MARKDOWN) ;;
+  *) fail "请选择 .md 幻灯片文件" ;;
+esac
+
+MD_DIR="$(cd "$(dirname "$MD_INPUT")" && pwd)"
+MD_NAME="$(basename "$MD_INPUT")"
+MD_ABS="$MD_DIR/$MD_NAME"
+
+CLI_REAL="$SLIDEV_RUNTIME/node_modules/@slidev/cli/bin/slidev.mjs"
+CLI_ENTRY="$SLIDEV_RUNTIME/.pnpm/slidev.mjs"
+
+if [[ ! -f "$CLI_REAL" ]]; then
+  fail "找不到 Slidev 共享运行时：$SLIDEV_RUNTIME"
+fi
+
+if [[ ! -L "$CLI_ENTRY" ]]; then
+  mkdir -p "$(dirname "$CLI_ENTRY")"
+  ln -sf "$CLI_REAL" "$CLI_ENTRY"
+fi
+
+# ---------------------------------------------------------------------------
+# Port reuse / avoidance
+#
+# Slidev's CLI always sets Vite `strictPort: true`. Passing --port 3030 therefore
+# does NOT bump to the next port; it fails with EADDRINUSE. We pick a free port
+# ourselves (3030..4000, same range as Slidev's getPort fallback when --port is
+# omitted) and pass that explicit port.
+#
+#   1. If any Slidev instance is already serving THIS markdown -> open it.
+#   2. Else start on the first free port from SLIDEV_PORT (default 3030).
+#   3. Do not kill other Slidev decks or unrelated listeners.
+# ---------------------------------------------------------------------------
+is_slidev_process() {
+  local cmd="$1"
+  [[ "$cmd" == *".pnpm/slidev.mjs"* ]] && return 0
+  [[ "$cmd" == *"@slidev/cli/bin/slidev.mjs"* ]] && return 0
+  [[ "$cmd" == *"node_modules/.bin/slidev"* ]] && return 0
+  [[ "$cmd" == *"/slidev "* || "$cmd" == *"/slidev\t"* ]] && [[ "$cmd" == *".md"* || "$cmd" == *".markdown"* ]] && return 0
+  return 1
+}
+
+markdown_arg_from_cmd() {
+  printf '%s\n' "$1" | awk '{
+    for (i=2; i<=NF; i++) if ($i ~ /\.(md|markdown|MD|MARKDOWN)$/) { print $i; exit }
+  }'
+}
+
+listening_pid_on_port() {
+  /usr/sbin/lsof -nP -iTCP:"$1" -sTCP:LISTEN 2>/dev/null \
+    | awk 'NR>1 {print $2; exit}'
+}
+
+listen_port_of_pid() {
+  /usr/sbin/lsof -nP -a -p "$1" -iTCP -sTCP:LISTEN 2>/dev/null \
+    | awk 'NR>1 {
+      n = $9
+      sub(/.*:/, "", n)
+      print n
+      exit
+    }'
+}
+
+find_running_deck_port() {
+  local pid cmd md port
+  while read -r pid cmd; do
+    [[ -n "$pid" ]] || continue
+    is_slidev_process "$cmd" || continue
+    md="$(markdown_arg_from_cmd "$cmd")"
+    [[ "$md" == "$MD_ABS" ]] || continue
+    port="$(listen_port_of_pid "$pid")"
+    if [[ -n "$port" ]]; then
+      printf '%s' "$port"
+      return 0
+    fi
+  done < <(/bin/ps -ax -o pid=,command=)
+  return 1
+}
+
+port_is_free() {
+  [[ -z "$(listening_pid_on_port "$1")" ]]
+}
+
+pick_free_port() {
+  local p
+  for p in $(seq "$SLIDEV_PORT_BASE" "$SLIDEV_PORT_MAX"); do
+    if port_is_free "$p"; then
+      printf '%s' "$p"
+      return 0
+    fi
+  done
+  return 1
+}
+
+EXISTING_PORT="$(find_running_deck_port || true)"
+if [[ -n "$EXISTING_PORT" ]]; then
+  /usr/bin/open "http://localhost:${EXISTING_PORT}/"
+  notify "复用已运行的 Slidev：$MD_NAME（端口 $EXISTING_PORT）"
+  exit 0
+fi
+
+SLIDEV_PORT="$(pick_free_port || true)"
+if [[ -z "$SLIDEV_PORT" ]]; then
+  fail "找不到空闲端口（已试 $SLIDEV_PORT_BASE–$SLIDEV_PORT_MAX）"
+fi
+SLIDEV_URL="http://localhost:${SLIDEV_PORT}/"
+if [[ "$SLIDEV_PORT" != "$SLIDEV_PORT_BASE" ]]; then
+  notify "端口 $SLIDEV_PORT_BASE 已被占用，改用 $SLIDEV_PORT"
+fi
+
+# ---------------------------------------------------------------------------
+# Auto-install missing theme (frontmatter `theme:`).
+# Slidev resolves themes by these conventions:
+#   default                 -> @slidev/theme-default       (already bundled)
+#   <name>                  -> @slidev/theme-<name>
+#   slidev-theme-<name>     -> use as-is
+#   @scope/pkg              -> use as-is
+#   ./path or /abs          -> local path, skip
+# ---------------------------------------------------------------------------
+extract_frontmatter_field() {
+  local file="$1" key="$2"
+  awk -v K="^${key}:" '
+    /^---[[:space:]]*$/ { c++; if (c==2) exit; next }
+    c==1 && $0 ~ K {
+      sub(K"[[:space:]]*", "")
+      gsub(/["'\'']/, "")
+      sub(/[[:space:]]*#.*$/, "")
+      sub(/[[:space:]]+$/, "")
+      print
+      exit
+    }
+  ' "$file"
+}
+
+resolve_theme_pkg() {
+  case "$1" in
+    ""|default|none) return 0 ;;
+    ./*|../*|/*)     return 0 ;;
+    @*/*)            printf '%s' "$1" ;;
+    slidev-theme-*)  printf '%s' "$1" ;;
+    *)               printf '@slidev/theme-%s' "$1" ;;
+  esac
+}
+
+ensure_theme_installed() {
+  local pkg="$1"
+  [[ -z "$pkg" ]] && return 0
+
+  local mod_dir="$SLIDEV_RUNTIME/node_modules/$pkg"
+  if [[ -d "$mod_dir" ]]; then
+    return 0
+  fi
+
+  local npm_bin
+  npm_bin="$(command -v npm || true)"
+  if [[ -z "$npm_bin" ]]; then
+    for cand in /usr/local/bin/npm /opt/homebrew/bin/npm; do
+      [[ -x "$cand" ]] && npm_bin="$cand" && break
+    done
+  fi
+  if [[ -z "$npm_bin" ]]; then
+    fail "缺主题 $pkg 但找不到 npm，无法自动安装"
+  fi
+
+  notify "首次使用主题 $pkg，正在安装…"
+  local install_log="$LOG_DIR/install-${STAMP:-$(date +%Y%m%d-%H%M%S)}.log"
+  (
+    cd "$SLIDEV_RUNTIME"
+    "$npm_bin" install --no-audit --no-fund --loglevel=error "$pkg"
+  ) >"$install_log" 2>&1 || {
+    fail "主题 $pkg 安装失败" "$install_log"
+  }
+
+  if [[ ! -d "$mod_dir" ]]; then
+    fail "主题 $pkg 安装后仍找不到，请检查包名" "$install_log"
+  fi
+  notify "主题 $pkg 安装完成"
+}
+
+THEME_RAW="$(extract_frontmatter_field "$MD_ABS" theme || true)"
+THEME_PKG="$(resolve_theme_pkg "$THEME_RAW" || true)"
+ensure_theme_installed "$THEME_PKG"
+
+# Idempotent runtime patch (extends Vite's server.fs.allow with our runtime
+# directory so the built-in editor, Monaco and Shiki transitive deps load
+# correctly even when the markdown lives far from the runtime tree).
+POSTINSTALL_SCRIPT="$HOME/Library/Application Support/Slidev/scripts/runtime-postinstall.mjs"
+if [[ -f "$POSTINSTALL_SCRIPT" ]]; then
+  SLIDEV_RUNTIME="$SLIDEV_RUNTIME" "$NODE_BIN" "$POSTINSTALL_SCRIPT" \
+    >>"$LOG_DIR/postinstall.log" 2>&1 || true
+fi
+
+ZH_CN_PATCH="$SLIDEV_RUNTIME/scripts/zh-cn-patch.mjs"
+if [[ -f "$ZH_CN_PATCH" ]]; then
+  SLIDEV_RUNTIME="$SLIDEV_RUNTIME" "$NODE_BIN" "$ZH_CN_PATCH" \
+    >>"$LOG_DIR/zh-cn-patch.log" 2>&1 || true
+fi
+
+ulimit -n 60000 2>/dev/null || ulimit -n 16384 2>/dev/null || true
+
+STAMP="$(date +%Y%m%d-%H%M%S)"
+LOG_FILE="$LOG_DIR/${STAMP}.log"
+
+cleanup() {
+  if [[ -n "${SLIDEV_PID:-}" ]] && kill -0 "$SLIDEV_PID" 2>/dev/null; then
+    kill "$SLIDEV_PID" 2>/dev/null || true
+    sleep 1
+    kill -9 "$SLIDEV_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
+
+if [[ -z "$NODE_BIN" ]]; then
+  fail "找不到 node，请确认已安装 Node.js"
+fi
+
+cd "$MD_DIR"
+env \
+  -u VSCODE_CWD \
+  -u VSCODE_PID \
+  -u VSCODE_IPC_HOOK \
+  -u VSCODE_IPC_HOOK_CLI \
+  -u VSCODE_NLS_CONFIG \
+  -u VSCODE_NODE_CACHED_DATA_DIR \
+  -u ELECTRON_RUN_AS_NODE \
+  SLIDEV_EXTRA_FS_ALLOW="$SLIDEV_RUNTIME" \
+  "$NODE_BIN" "$CLI_ENTRY" "$MD_ABS" --port "$SLIDEV_PORT" >"$LOG_FILE" 2>&1 &
+SLIDEV_PID=$!
+
+notify "正在启动：$MD_NAME"
+
+for _ in $(seq 1 60); do
+  if ! kill -0 "$SLIDEV_PID" 2>/dev/null; then
+    tail -80 "$LOG_FILE" >&2 || true
+    fail "Slidev 启动失败" "$LOG_FILE"
+  fi
+  if /usr/bin/curl -fsS "$SLIDEV_URL" >/dev/null 2>&1; then
+    break
+  fi
+  sleep 1
+done
+
+if ! /usr/bin/curl -fsS "$SLIDEV_URL" >/dev/null 2>&1; then
+  fail "Slidev 启动超时" "$LOG_FILE"
+fi
+
+/usr/bin/open "$SLIDEV_URL"
+notify "演示已打开：$MD_NAME"
+
+# Wait until the browser drops all persistent dev-server connections.
+# Notes:
+#   * Slidev/Vite keeps a WebSocket alive while the page is open.
+#   * Chrome / Safari keep keep-alive HTTP connections for many seconds after
+#     a tab closes, and may also keep them while a tab is just backgrounded.
+#   * To avoid killing Slidev under your feet, we require a LONG empty
+#     window (~60s) before terminating. Re-launching the same file in this
+#     window will fast-path via the reuse logic above.
+EMPTY_THRESHOLD="${SLIDEV_EMPTY_THRESHOLD:-30}"   # 30 ticks * 2s = 60s
+SLEEP_SECS=2
+seen_connection=0
+empty_ticks=0
+
+while kill -0 "$SLIDEV_PID" 2>/dev/null; do
+  if /usr/sbin/lsof -nP -iTCP:"$SLIDEV_PORT" -sTCP:ESTABLISHED -P 2>/dev/null | awk 'NR>1 {found=1; exit} END{exit !found}'; then
+    seen_connection=1
+    empty_ticks=0
+  elif [[ "$seen_connection" -eq 1 ]]; then
+    empty_ticks=$((empty_ticks + 1))
+    if [[ "$empty_ticks" -ge "$EMPTY_THRESHOLD" ]]; then
+      notify "页面已关闭，Slidev 已停止"
+      break
+    fi
+  fi
+  sleep "$SLEEP_SECS"
+done
+
+# If we exit the loop because the Slidev process died on its own (e.g. a
+# theme change in the running markdown referenced a missing package, or a
+# Vue/Vite compile failure), surface that to the user with the log file so
+# the failure isn't silent.
+if ! kill -0 "$SLIDEV_PID" 2>/dev/null && [[ "$seen_connection" -eq 1 ]]; then
+  EXIT_CODE=$(wait "$SLIDEV_PID" 2>/dev/null; echo $?)
+  if [[ "${EXIT_CODE:-0}" -ne 0 && "${EXIT_CODE:-0}" -ne 143 && "${EXIT_CODE:-0}" -ne 130 ]]; then
+    notify "Slidev 意外退出，正在打开日志"
+    /usr/bin/open -e "$LOG_FILE" >/dev/null 2>&1 || true
+  fi
+fi
+

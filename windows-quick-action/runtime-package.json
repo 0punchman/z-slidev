@@ -1,0 +1,12 @@
+{
+  "name": "slidev-runtime",
+  "private": true,
+  "type": "module",
+  "description": "Shared runtime for slidev-open CLI. All .md decks reuse this single install.",
+  "dependencies": {
+    "@slidev/cli": "52.19.1",
+    "@slidev/theme-apple-basic": "0.25.1",
+    "@slidev/theme-default": "0.25.0",
+    "@slidev/theme-seriph": "0.25.0"
+  }
+}
